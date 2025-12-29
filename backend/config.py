@@ -1,7 +1,14 @@
 # backend/config.py
+import os
 
-# Which data source to use:
-#   "sim"   = internal Python simulator (what you have now)
-#   "can"   = CAN bus (BMW / EV CAN decoding)
-#   "esp32" = wireless ESP32 telemetry module
-SOURCE = "esp32"
+# Default source if nothing is set in the environment
+_default_source = os.getenv("SOURCE", "sim").lower()
+
+def get_source() -> str:
+    # If user sets $env:SOURCE it will be used; otherwise fallback.
+    return os.getenv("SOURCE", _default_source).lower()
+
+def set_source(value: str):
+    # Optional: lets you switch source in-process later if you want.
+    global _default_source
+    _default_source = (value or "sim").lower()

@@ -1,9 +1,7 @@
 # Python
 __pycache__/
 *.pyc
-
-# Local runtime files
-*.log
+*.log              # Local runtime files
 telemetry.db
 backend_error.log
 

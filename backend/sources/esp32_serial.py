@@ -1,71 +1,113 @@
-import json
-import threading
+# backend/sources/esp32_serial.py
+import os
 import time
-from typing import Callable, Optional
-
+import json
 import serial
+from serial.tools import list_ports
 
+DEFAULT_BAUD = int(os.getenv("ESP32_BAUD", "115200"))
+PORT_OVERRIDE = os.getenv("ESP32_PORT")
 
-def start_esp32_serial(
-    port: str,
-    baud: int,
-    on_message: Callable[[dict], None],
-    stop_event: threading.Event,
-    *,
-    timeout: float = 1.0,
-) -> threading.Thread:
-    """
-    Opens the ESP32 serial port and streams newline-delimited JSON objects.
-    Calls on_message(parsed_dict) for each valid JSON line.
-    Runs in a background thread; stop via stop_event.set().
-    """
+KEYWORDS = [
+    "CP210", "Silicon Labs",
+    "CH340", "CH341",
+    "USB Serial", "USB to UART",
+    "FTDI",
+]
 
-    def worker():
-        ser: Optional[serial.Serial] = None
-        while not stop_event.is_set():
+KNOWN_VIDPID = {
+    (0x10C4, 0xEA60),  # Silicon Labs CP210x
+}
+
+def autodetect_port():
+    if PORT_OVERRIDE:
+        return PORT_OVERRIDE
+
+    ports = list(list_ports.comports())
+    if not ports:
+        return None
+
+    for p in ports:
+        if p.vid is not None and p.pid is not None and (p.vid, p.pid) in KNOWN_VIDPID:
+            return p.device
+
+    for p in ports:
+        desc = (p.description or "")
+        manu = (p.manufacturer or "")
+        text = f"{desc} {manu}".lower()
+        if any(k.lower() in text for k in KEYWORDS):
+            return p.device
+
+    if len(ports) == 1:
+        return ports[0].device
+
+    return None
+
+def open_serial_with_retry(baud=DEFAULT_BAUD, timeout=1, retry_delay=1.0):
+    while True:
+        port = autodetect_port()
+        if not port:
+            print("[ESP32] No matching serial port yet. Plug ESP32 in... retrying")
+            time.sleep(retry_delay)
+            continue
+
+        try:
+            print(f"[ESP32] Opening {port} @ {baud}")
+            ser = serial.Serial(port, baudrate=baud, timeout=timeout)
+
+            time.sleep(0.3)
             try:
-                ser = serial.Serial(port, baud, timeout=timeout)
-                # give ESP32 a moment; also avoids some first-line garbage
-                time.sleep(0.2)
+                ser.reset_input_buffer()
+            except Exception:
+                pass
 
-                while not stop_event.is_set():
-                    raw = ser.readline()
-                    if not raw:
-                        continue
+            return ser
 
-                    line = raw.decode("utf-8", errors="ignore").strip()
-                    if not line:
-                        continue
+        except PermissionError:
+            print(f"[ESP32] {port} is busy (Access denied). Close Serial Monitor / other scripts. Retrying...")
+            time.sleep(1.5)
 
-                    # Ignore ESP32 boot spam that is not JSON
-                    if not line.startswith("{"):
-                        continue
+        except Exception as e:
+            print(f"[ESP32] Failed to open {port}: {e}")
+            time.sleep(retry_delay)
 
-                    try:
-                        msg = json.loads(line)
-                        on_message(msg)
-                    except json.JSONDecodeError:
-                        # If a line is partial or corrupted, just skip it
-                        continue
+def esp32_stream_forever(on_message, baud=DEFAULT_BAUD):
+    while True:
+        ser = None
+        try:
+            ser = open_serial_with_retry(baud=baud, timeout=1, retry_delay=1.0)
+            print(f"[ESP32] Connected on {ser.port} @ {baud}")
 
-            except serial.SerialException as e:
-                # Port busy/disconnected; retry after a short delay
-                print(f"[ESP32] SerialException: {e} (retrying...)")
-                time.sleep(0.5)
-
-            except PermissionError as e:
-                print(f"[ESP32] PermissionError: {e} (COM port in use?)")
-                time.sleep(0.8)
-
-            finally:
+            while True:
                 try:
-                    if ser and ser.is_open:
-                        ser.close()
-                except Exception:
-                    pass
+                    raw = ser.readline()
+                except Exception as e:
+                    raise RuntimeError(f"Serial read failed: {e}")
 
-        print("[ESP32] Stopped serial thread.")
+                if not raw:
+                    continue
 
-    t = threading.Thread(target=worker, name="esp32_serial", daemon=True)
-    t.start()
-    return t
+                line = raw.decode("utf-8", errors="ignore").strip()
+                if not line:
+                    continue
+
+                if not line.startswith("{"):
+                    continue
+
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                on_message(msg)
+
+        except Exception as e:
+            print(f"[ESP32] Disconnected / error: {e}. Reconnecting in 1s...")
+            time.sleep(1.0)
+
+        finally:
+            try:
+                if ser:
+                    ser.close()
+            except Exception:
+                pass
