@@ -1,110 +1,141 @@
 import asyncio
-import json
-import traceback
-from datetime import datetime
 import os
+import traceback
+from contextlib import suppress
+from datetime import datetime
+from typing import Any, Set
 
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 from config import get_source
-from data_source import get_sensor_data
-from filters import ema_filter
-from logger import init_log, append_log
+from database import append_log, init_log
+from telemetry import TelemetryService
 
 HOST = "0.0.0.0"
 PORT = 8765
+FRAME_INTERVAL_S = 0.05
+ERROR_RETRY_S = 0.5
+PING_INTERVAL_S = 20
+PING_TIMEOUT_S = 20
 
-ERROR_LOG = "backend_error.log"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+ERROR_LOG = os.path.join(DATA_DIR, "backend_error.log")
 MAX_ERROR_LOG_BYTES = 2_000_000  # ~2MB
 
-SENSOR_KEYS = ["rpm", "speed", "coolant", "oil", "boost", "voltage"]
-prev_values = {k: None for k in SENSOR_KEYS}
 
-
-def rotate_error_log():
+def rotate_error_log() -> None:
     try:
         if os.path.exists(ERROR_LOG) and os.path.getsize(ERROR_LOG) > MAX_ERROR_LOG_BYTES:
-            # keep one backup
-            if os.path.exists(ERROR_LOG + ".1"):
-                os.remove(ERROR_LOG + ".1")
-            os.rename(ERROR_LOG, ERROR_LOG + ".1")
-    except Exception:
+            backup_path = ERROR_LOG + ".1"
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            os.rename(ERROR_LOG, backup_path)
+    except OSError:
+        # Logging should never take the server down.
         pass
 
 
-def log_error(e: Exception):
+def log_error(exc: BaseException, context: str = "backend error") -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
     rotate_error_log()
-    with open(ERROR_LOG, "a", encoding="utf-8") as f:
-        f.write(f"[{datetime.utcnow().isoformat()}] {repr(e)}\n")
-        f.write(traceback.format_exc() + "\n\n")
+    formatted = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+    with open(ERROR_LOG, "a", encoding="utf-8") as handle:
+        handle.write(f"[{datetime.utcnow().isoformat()}] {context}: {repr(exc)}\n")
+        handle.write(formatted + "\n")
 
 
-def clamp(x, lo, hi):
-    if x is None:
-        return None
-    try:
-        x = float(x)
-    except Exception:
-        return None
-    return max(lo, min(hi, x))
+class TelemetryServer:
+    def __init__(self) -> None:
+        self._telemetry = TelemetryService()
+        self._clients: Set[Any] = set()
 
+    async def register(self, websocket: Any) -> None:
+        self._clients.add(websocket)
 
-async def handler(websocket):
-    global prev_values
+        latest = self._telemetry.latest_frame()
+        if latest is None:
+            return
 
-    while True:
         try:
-            raw = get_sensor_data() or {}
+            await websocket.send(latest.to_json())
+        except ConnectionClosed:
+            self._clients.discard(websocket)
 
-            out = {}
+    def unregister(self, websocket: Any) -> None:
+        self._clients.discard(websocket)
 
-            # Always pass metadata through
-            out["source"] = raw.get("source", get_source())
-            out["status"] = raw.get("status", "ok")
-            out["age_s"] = float(raw.get("age_s", 0.0))
+    async def handler(self, websocket: Any) -> None:
+        await self.register(websocket)
+        try:
+            await websocket.wait_closed()
+        finally:
+            self.unregister(websocket)
 
-            # Clamp inputs
-            clamped = {
-                "rpm": clamp(raw.get("rpm"), 0, 9000),
-                "speed": clamp(raw.get("speed"), 0, 200),
-                "coolant": clamp(raw.get("coolant"), -40, 200),
-                "oil": clamp(raw.get("oil"), -40, 200),
-                "boost": clamp(raw.get("boost"), -30, 40),
-                "voltage": clamp(raw.get("voltage"), 0, 16),
-            }
+    async def broadcast(self, frame: dict) -> None:
+        if not self._clients:
+            return
 
-            # Smooth only sensor keys
-            for key in SENSOR_KEYS:
-                new_val = clamped.get(key)
-                prev = prev_values.get(key)
-                smoothed_val = ema_filter(prev, new_val, alpha=0.25)
-                out[key] = smoothed_val
-                prev_values[key] = smoothed_val
+        message = frame.to_json()
+        clients = list(self._clients)
+        results = await asyncio.gather(
+            *(client.send(message) for client in clients),
+            return_exceptions=True,
+        )
 
-            out["ts"] = datetime.utcnow().isoformat() + "Z"
-            out["units"] = {
-                "rpm": "rpm",
-                "speed": "mph",
-                "coolant": "C",
-                "oil": "C",
-                "boost": "psi",
-                "voltage": "V",
-            }
+        for client, result in zip(clients, results):
+            if result is None:
+                continue
 
-            append_log(out)
-            await websocket.send(json.dumps(out))
-            await asyncio.sleep(0.05)
+            self.unregister(client)
+            if not isinstance(result, ConnectionClosed):
+                log_error(result, "failed to send telemetry frame")
 
-        except Exception as e:
-            log_error(e)
-            await asyncio.sleep(0.5)
+    async def run_telemetry_loop(self) -> None:
+        while True:
+            try:
+                frame = self._telemetry.next_frame()
+                try:
+                    append_log(frame)
+                except Exception as exc:
+                    log_error(exc, "telemetry database logging failed")
+                await self.broadcast(frame)
+                await asyncio.sleep(FRAME_INTERVAL_S)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_error(exc, "telemetry loop failure")
+                await asyncio.sleep(ERROR_RETRY_S)
 
 
-async def main():
-    init_log()
-    async with websockets.serve(handler, HOST, PORT):
-        print(f"WebSocket server running at ws://{HOST}:{PORT} (SOURCE={get_source()})")
-        await asyncio.Future()
+async def main() -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        init_log()
+    except Exception as exc:
+        log_error(exc, "telemetry database initialization failed")
+
+    server = TelemetryServer()
+    telemetry_task = asyncio.create_task(server.run_telemetry_loop())
+
+    try:
+        async with websockets.serve(
+            server.handler,
+            HOST,
+            PORT,
+            ping_interval=PING_INTERVAL_S,
+            ping_timeout=PING_TIMEOUT_S,
+            close_timeout=5,
+            max_queue=32,
+        ):
+            print(f"WebSocket server running at ws://{HOST}:{PORT} (SOURCE={get_source()})")
+            await asyncio.Future()
+    finally:
+        telemetry_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await telemetry_task
 
 
 if __name__ == "__main__":

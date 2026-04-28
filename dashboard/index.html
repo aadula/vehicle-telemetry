@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Vehicle Telemetry Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b1220" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Engineering Telemetry</p>
+        <h1>Real-Time Vehicle Telemetry Dashboard</h1>
+        <p class="subtitle">Live stream, replay, and health checks for simulated and future hardware-backed data sources.</p>
+      </div>
+
+      <div class="status-panel">
+        <div class="status-chip" id="connection-chip">
+          <span class="status-dot"></span>
+          <span id="connection-status">Disconnected</span>
+        </div>
+        <div class="status-chip">
+          <span class="chip-label">Source</span>
+          <span id="source-indicator">--</span>
+        </div>
+        <div class="status-chip">
+          <span class="chip-label">Session</span>
+          <span id="session-status">Idle</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="toolbar">
+      <div class="toolbar-copy">
+        <div class="toolbar-title">Run Controls</div>
+        <div class="toolbar-text">Record a stream snapshot or replay the current session without interrupting the dashboard layout.</div>
+      </div>
+
+      <div class="controls">
+        <button id="record-btn" type="button">Start Recording</button>
+        <button id="stop-btn" type="button">Stop Recording</button>
+        <button id="replay-btn" type="button">Replay Session</button>
+      </div>
+    </section>
+
+    <section class="alerts-panel" aria-live="polite">
+      <div class="section-heading">
+        <p class="section-kicker">Warnings</p>
+        <h2>Alert Monitor</h2>
+      </div>
+      <ul id="alert-list" class="alert-list">
+        <li class="alert-item is-clear">Systems normal.</li>
+      </ul>
+    </section>
+
+    <section class="metrics-section">
+      <div class="section-heading">
+        <p class="section-kicker">Core Metrics</p>
+        <h2>Powertrain Overview</h2>
+      </div>
+
+      <div class="primary-grid">
+        <article class="metric-card metric-card-primary" data-metric-card="rpm">
+          <p class="metric-label">RPM</p>
+          <p class="metric-value metric-value-xl" id="rpm">--</p>
+          <p class="metric-unit">rev/min</p>
+        </article>
+
+        <article class="metric-card metric-card-primary" data-metric-card="speed">
+          <p class="metric-label">Speed</p>
+          <p class="metric-value metric-value-xl" id="speed">--</p>
+          <p class="metric-unit">mph</p>
+        </article>
+
+        <article class="metric-card metric-card-primary" data-metric-card="boost">
+          <p class="metric-label">Boost</p>
+          <p class="metric-value metric-value-xl" id="boost">--</p>
+          <p class="metric-unit">psi</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="metrics-section">
+      <div class="section-heading">
+        <p class="section-kicker">Systems</p>
+        <h2>Cooling, Electrical, and Derived Metrics</h2>
+      </div>
+
+      <div class="metrics-grid">
+        <article class="metric-card" data-metric-card="coolant">
+          <p class="metric-label">Coolant Temp</p>
+          <p class="metric-value" id="coolant">--</p>
+          <p class="metric-unit">deg C</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="oil">
+          <p class="metric-label">Oil Temp</p>
+          <p class="metric-value" id="oil">--</p>
+          <p class="metric-unit">deg C</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="voltage">
+          <p class="metric-label">System Voltage</p>
+          <p class="metric-value" id="voltage">--</p>
+          <p class="metric-unit">V</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="boost_target">
+          <p class="metric-label">Boost Target</p>
+          <p class="metric-value" id="boost_target">--</p>
+          <p class="metric-unit">psi</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="boost_actual">
+          <p class="metric-label">Boost Actual</p>
+          <p class="metric-value" id="boost_actual">--</p>
+          <p class="metric-unit">psi</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="boost_error">
+          <p class="metric-label">Boost Error</p>
+          <p class="metric-value" id="boost_error">--</p>
+          <p class="metric-unit">psi</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="turbo_health">
+          <p class="metric-label">Turbo Health</p>
+          <p class="metric-value metric-value-text" id="turbo_health">--</p>
+          <p class="metric-unit">assessment</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="zeroToSixty">
+          <p class="metric-label">0-60 Time</p>
+          <p class="metric-value" id="zeroToSixty">--</p>
+          <p class="metric-unit">seconds</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="hp">
+          <p class="metric-label">Horsepower</p>
+          <p class="metric-value" id="hp">--</p>
+          <p class="metric-unit">est</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="tq">
+          <p class="metric-label">Torque</p>
+          <p class="metric-value" id="tq">--</p>
+          <p class="metric-unit">est</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="iat">
+          <p class="metric-label">IAT</p>
+          <p class="metric-value" id="iat">--</p>
+          <p class="metric-unit">deg C</p>
+        </article>
+
+        <article class="metric-card" data-metric-card="trans_temp">
+          <p class="metric-label">Trans Temp</p>
+          <p class="metric-value" id="trans_temp">--</p>
+          <p class="metric-unit">deg C</p>
+        </article>
+
+        <article class="metric-card metric-card-wide" data-metric-card="timing_corrections">
+          <p class="metric-label">Timing Corrections</p>
+          <p class="metric-value metric-value-text" id="timing_corrections">--</p>
+          <p class="metric-unit">per cylinder</p>
+        </article>
+      </div>
+    </section>
+
+    <script src="app.js"></script>
+  </div>
+</body>
+</html>

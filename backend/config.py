@@ -1,14 +1,21 @@
-# backend/config.py
 import os
 
-# Default source if nothing is set in the environment
-_default_source = os.getenv("SOURCE", "sim").lower()
+DEFAULT_SOURCE = "sim"
+SUPPORTED_SOURCES = {"sim", "can", "esp32", "obd"}
+
+_default_source = os.getenv("SOURCE", DEFAULT_SOURCE).lower()
+
+
+def normalize_source(value: str) -> str:
+    normalized = (value or DEFAULT_SOURCE).lower()
+    if normalized in SUPPORTED_SOURCES:
+        return normalized
+    return normalized
 
 def get_source() -> str:
-    # If user sets $env:SOURCE it will be used; otherwise fallback.
-    return os.getenv("SOURCE", _default_source).lower()
+    return normalize_source(os.getenv("SOURCE", _default_source))
 
-def set_source(value: str):
-    # Optional: lets you switch source in-process later if you want.
+
+def set_source(value: str) -> None:
     global _default_source
-    _default_source = (value or "sim").lower()
+    _default_source = normalize_source(value)
