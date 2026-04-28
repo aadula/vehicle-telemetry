@@ -1,4 +1,4 @@
-# Real-Time Vehicle Telemetry Dashboard
+# Vehicle Telemetry Dashboard
 
 Open-source vehicle telemetry software for streaming live engine and chassis data to a browser dashboard when the factory cluster does not show the values you actually want.
 
@@ -18,7 +18,7 @@ I built this because I own a tuned BMW and a turbo Subaru, and the factory infot
 
 ## Architecture
 
-```text
+\`\`\`text
 Vehicle data source
     |
     v
@@ -30,45 +30,45 @@ WebSocket
     |
     v
 Browser dashboard
-```
+\`\`\`
 
 WebSockets are used because telemetry is continuous and server-driven, so pushing frames is simpler and more responsive than polling from the browser. The backend keeps a source abstraction layer so the dashboard and logger can stay stable whether the input is simulated data now or real hardware later. Simulation came first so the data model, alerting, and session logging could be built before debugging serial, CAN, or vehicle-specific integration issues.
 
 ## Tech Stack
 
-- Python with `asyncio` and `websockets` for the backend
+- Python with \`asyncio\` and \`websockets\` for the backend
 - SQLite for session logging
 - HTML, CSS, and vanilla JavaScript for the dashboard
 - Planned hardware layer: ESP32, CAN transceiver, and BLE
 
 ## Project Structure
 
-```text
+\`\`\`text
 vehicle-telemetry/
 ├── backend/    # Python backend, telemetry pipeline, source layer, logging
 ├── dashboard/  # Static browser dashboard
 ├── data/       # Runtime data directory for local logs and SQLite database
 └── docs/       # Architecture and hardware roadmap notes
-```
+\`\`\`
 
 ## Run It Locally
 
-```bash
+\`\`\`bash
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install -r backend/requirements.txt
 python3 backend/server.py
-```
+\`\`\`
 
 In a second terminal:
 
-```bash
-cd /path/to/real-time-vehicle-telemetry
+\`\`\`bash
+cd /path/to/vehicle-telemetry
 source .venv/bin/activate
 python3 -m http.server 8000
-```
+\`\`\`
 
-Then open `localhost:8000/dashboard/`.
+Then open \`localhost:8000/dashboard/\`.
 
 ## Roadmap
 
