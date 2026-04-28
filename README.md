@@ -44,7 +44,7 @@ WebSockets are used because telemetry is continuous and server-driven, so pushin
 ## Project Structure
 
 ```text
-real-time-vehicle-telemetry/
+vehicle-telemetry/
 ├── backend/    # Python backend, telemetry pipeline, source layer, logging
 ├── dashboard/  # Static browser dashboard
 ├── data/       # Runtime data directory for local logs and SQLite database
